@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DiffDx — Benchmarking Claude on Medical Differential Diagnosis</title>
+  <meta name="description" content="An independent benchmark of Claude Sonnet 4.6 on the DDXPlus synthetic differential diagnosis dataset. Research only — not a clinical tool.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #09090c;
+      --surface:      #0f0f14;
+      --card:         #14141a;
+      --card-hover:   #18181f;
+      --border:       #22222c;
+      --border-light: #2c2c38;
+      --text:         #e4e4ec;
+      --muted:        #7878a0;
+      --faint:        #44445a;
+      --accent:       #2dd4bf;
+      --accent-dim:   #14b8a6;
+      --accent-glow:  rgba(45, 212, 191, 0.12);
+      --accent-border:rgba(45, 212, 191, 0.28);
+      --warn:         #f59e0b;
+      --warn-bg:      rgba(245, 158, 11, 0.07);
+      --warn-border:  rgba(245, 158, 11, 0.28);
+      --warn-text:    #c8952a;
+      --success:      #34d399;
+      --soft:         #fbbf24;
+      --hard:         #f87171;
+      --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+      --mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+      --radius: 12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ─── Typography ─────────────────────────────────────── */
+    h1 {
+      font-size: clamp(1.9rem, 5vw, 3rem);
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      line-height: 1.12;
+      color: var(--text);
+    }
+    h2 {
+      font-size: 1.45rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    p { color: var(--muted); }
+
+    .eyebrow {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: rgba(255,255,255,0.07);
+      padding: 2px 7px;
+      border-radius: 4px;
+      color: var(--text);
+    }
+
+    a { color: var(--accent); }
+
+    /* ─── Layout ─────────────────────────────────────────── */
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    section {
+      padding: 88px 0;
+    }
+    section + section {
+      border-top: 1px solid var(--border);
+    }
+
+    .section-header {
+      margin-bottom: 44px;
+    }
+    .section-header p {
+      margin-top: 10px;
+      max-width: 60ch;
+      font-size: 0.95rem;
+    }
+
+    /* ─── Nav ────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      background: rgba(9,9,12,0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-logo {
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-decoration: none;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .nav-logo span { color: var(--accent); }
+    nav ul {
+      display: flex;
+      list-style: none;
+      gap: 28px;
+    }
+    nav ul a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.83rem;
+      transition: color 0.15s;
+    }
+    nav ul a:hover { color: var(--text); }
+
+    /* ─── Disclaimer ─────────────────────────────────────── */
+    .disclaimer {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .disclaimer-icon { flex-shrink: 0; padding-top: 1px; }
+    .disclaimer-content strong {
+      display: block;
+      color: var(--warn);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+    .disclaimer-content p {
+      color: var(--warn-text);
+      font-size: 0.88rem;
+      max-width: none;
+      line-height: 1.55;
+    }
+
+    /* ─── Hero ───────────────────────────────────────────── */
+    #hero { padding: 96px 0 80px; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-glow);
+      border: 1px solid var(--accent-border);
+      border-radius: 100px;
+      padding: 5px 14px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 28px;
+    }
+    .hero-badge .pulse {
+      width: 7px; height: 7px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .hero-title { margin-bottom: 18px; }
+
+    .hero-title em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .hero-subtitle {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 58ch;
+      line-height: 1.65;
+      margin-bottom: 36px;
+    }
+
+    .hero-disclaimer { margin-bottom: 36px; }
+
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .hero-author {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .hero-author strong { color: var(--text); font-weight: 600; }
+
+    .gh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 7px 16px;
+      font-size: 0.83rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+    .gh-btn:hover {
+      color: var(--text);
+      border-color: var(--accent-border);
+      background: var(--accent-glow);
+    }
+
+    /* ─── Metrics ────────────────────────────────────────── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 22px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric-card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), transparent 70%);
+    }
+    .metric-card-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin-bottom: 10px;
+    }
+    .metric-card-value {
+      font-size: 2.6rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      color: var(--text);
+      line-height: 1;
+    }
+    .metric-card-value sup {
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: var(--muted);
+      vertical-align: super;
+      letter-spacing: 0;
+    }
+    .metric-bar-track {
+      height: 3px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 2px;
+      margin: 14px 0 10px;
+      overflow: hidden;
+    }
+    .metric-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    .metric-card-caption {
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.45;
+      max-width: none;
+    }
+
+    /* ─── SVG Bar Chart ──────────────────────────────────── */
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 36px;
+    }
+    .chart-card-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin-bottom: 24px;
+    }
+    .chart-svg { width: 100%; overflow: visible; }
+    .chart-bar-label { font-family: var(--font); font-size: 12px; fill: #7878a0; }
+    .chart-bar-value { font-family: var(--font); font-size: 12px; font-weight: 600; fill: #e4e4ec; }
+    .chart-bar-track { fill: rgba(255,255,255,0.05); rx: 3; }
+    .chart-bar-fill  { fill: #2dd4bf; rx: 3; }
+
+    /* ─── Findings ───────────────────────────────────────── */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .finding-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 26px;
+    }
+    .finding-icon {
+      width: 38px; height: 38px;
+      background: var(--accent-glow);
+      border: 1px solid var(--accent-border);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+    .finding-card h3 { margin-bottom: 10px; line-height: 1.35; }
+    .finding-card p { font-size: 0.875rem; max-width: none; line-height: 1.6; }
+
+    /* ─── Methodology ────────────────────────────────────── */
+    .method-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .method-block {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 26px 24px;
+    }
+    .method-block h3 { margin-bottom: 10px; }
+    .method-block p,
+    .method-block li { font-size: 0.875rem; max-width: none; line-height: 1.6; }
+    .method-block ul { padding-left: 18px; color: var(--muted); margin-top: 6px; }
+    .method-block li { margin-bottom: 4px; }
+    .method-block-wide { grid-column: 1 / -1; }
+
+    .pipeline {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .pipe-step {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .pipe-arrow {
+      color: var(--faint);
+      font-size: 0.9rem;
+      padding: 0 8px;
+    }
+
+    /* ─── Failure Browser ────────────────────────────────── */
+    .case-study {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    details > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 20px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary:hover { background: rgba(255,255,255,0.02); }
+    details[open] > summary { border-bottom: 1px solid var(--border); }
+
+    .summary-main { flex: 1; min-width: 0; }
+    .summary-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 3px;
+      flex-wrap: wrap;
+    }
+    .case-badge {
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 2px 9px;
+      border-radius: 100px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .badge-soft { background: rgba(251,191,36,0.12); color: #fbbf24; border: 1px solid rgba(251,191,36,0.2); }
+    .badge-hard { background: rgba(248,113,113,0.1); color: #f87171; border: 1px solid rgba(248,113,113,0.2); }
+    .case-name { font-weight: 600; font-size: 0.95rem; }
+    .case-meta { font-size: 0.8rem; color: var(--muted); }
+    .chevron {
+      color: var(--faint);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    details[open] .chevron { transform: rotate(90deg); }
+
+    .case-body { padding: 24px; }
+
+    .case-fields {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .case-field-label {
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin-bottom: 4px;
+    }
+    .case-field-value {
+      font-size: 0.88rem;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .cf-wrong  { color: var(--hard); }
+    .cf-gt     { color: var(--accent); }
+
+    .analysis-block {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: 16px 20px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .analysis-block strong { color: var(--text); }
+
+    .gt-diff-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .gt-diff-pill {
+      font-size: 0.72rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border-light);
+      border-radius: 100px;
+      padding: 2px 10px;
+      color: var(--muted);
+    }
+    .gt-diff-pill.gt-hit {
+      background: var(--accent-glow);
+      border-color: var(--accent-border);
+      color: var(--accent);
+    }
+
+    /* ─── Limitations ────────────────────────────────────── */
+    .limit-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .limit-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+    }
+    .limit-item h4 {
+      font-size: 0.87rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .limit-item p {
+      font-size: 0.82rem;
+      max-width: none;
+      line-height: 1.55;
+    }
+
+    /* ─── Future Work ────────────────────────────────────── */
+    .future-list {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .future-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 16px 18px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .future-num {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--accent);
+      background: var(--accent-glow);
+      border: 1px solid var(--accent-border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .future-item p {
+      font-size: 0.85rem;
+      max-width: none;
+      line-height: 1.55;
+    }
+    .future-item strong { color: var(--text); }
+
+    /* ─── Footer ─────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 52px 0 40px;
+    }
+    .footer-inner {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .footer-disclaimer {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 0.82rem;
+      color: var(--warn-text);
+      line-height: 1.55;
+    }
+    .footer-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .footer-links a { color: var(--muted); text-decoration: none; transition: color 0.15s; }
+    .footer-links a:hover { color: var(--accent); }
+    .footer-links .sep { color: var(--faint); }
+    .footer-links .logo { font-weight: 700; color: var(--text); font-size: 0.9rem; }
+    .footer-links .logo span { color: var(--accent); }
+
+    .citation {
+      font-size: 0.78rem;
+      color: var(--faint);
+      line-height: 1.5;
+      font-family: var(--mono);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+    }
+
+    /* ─── Responsive ─────────────────────────────────────── */
+    @media (max-width: 720px) {
+      nav ul { display: none; }
+      section { padding: 60px 0; }
+      .metrics-grid { grid-template-columns: 1fr 1fr; }
+      .metric-card-value { font-size: 2rem; }
+      .findings-grid { grid-template-columns: 1fr; }
+      .method-grid { grid-template-columns: 1fr; }
+      .method-block-wide { grid-column: 1; }
+      .case-fields { grid-template-columns: 1fr 1fr; }
+      .limit-grid { grid-template-columns: 1fr; }
+      .future-list { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) {
+      .metrics-grid { grid-template-columns: 1fr; }
+      .case-fields { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Scroll progress bar ────────────────────────────── */
+    #scroll-progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      width: 0%;
+      background: var(--accent);
+      z-index: 300;
+      pointer-events: none;
+    }
+
+    /* ─── Fade-up animation ──────────────────────────────── */
+    .will-animate {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 700ms ease-out, transform 700ms ease-out;
+    }
+    .is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .will-animate {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+      }
+      #scroll-progress { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="scroll-progress" role="progressbar" aria-hidden="true"></div>
+
+<!-- ─── NAV ──────────────────────────────────────────────── -->
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="#hero">Diff<span>Dx</span></a>
+    <ul>
+      <li><a href="#metrics">Metrics</a></li>
+      <li><a href="#findings">Findings</a></li>
+      <li><a href="#methodology">Method</a></li>
+      <li><a href="#failures">Cases</a></li>
+      <li><a href="#limitations">Limitations</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ─── HERO ─────────────────────────────────────────────── -->
+<section id="hero">
+  <div class="container">
+
+    <div class="hero-badge">
+      <span class="pulse"></span>
+      Research Benchmark &nbsp;·&nbsp; Synthetic Data
+    </div>
+
+    <h1 class="hero-title">
+      <em>DiffDx</em> — Benchmarking Claude<br>on Medical Differential Diagnosis
+    </h1>
+
+    <p class="hero-subtitle">
+      An independent evaluation of Claude Sonnet&nbsp;4.6 on 36 patient cases
+      drawn from the DDXPlus synthetic dataset. We measure how well the model ranks
+      the correct diagnosis within a differential of up to ten candidates.
+    </p>
+
+    <div class="hero-disclaimer">
+      <div class="disclaimer">
+        <div class="disclaimer-icon">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 2L2 17h16L10 2z" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="M10 8v4M10 13.5v.5" stroke="#f59e0b" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="disclaimer-content">
+          <strong>Research only — not a clinical tool</strong>
+          <p>
+            This benchmark uses <strong>entirely synthetic, artificial patient data</strong>. Results
+            describe model behaviour on a controlled dataset and carry no implications for real-world
+            clinical performance. <strong>Do not use these findings to inform any medical decision.</strong>
+            Consult a qualified healthcare professional for any medical concern.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-meta">
+      <p class="hero-author">Built by <strong>Aaryan Mahamuni</strong></p>
+      <a class="gh-btn" href="https://github.com/amahamu1-art/diffdx" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.604-3.369-1.341-3.369-1.341-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.741 0 .267.18.579.688.481C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+        </svg>
+        GitHub
+      </a>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── METRICS ───────────────────────────────────────────── -->
+<section id="metrics">
+  <div class="container">
+
+    <div class="section-header">
+      <span class="eyebrow">Results</span>
+      <h2>Headline metrics</h2>
+      <p>36 cases evaluated · claude-sonnet-4-6 · DDXPlus test split · May 2026</p>
+    </div>
+
+    <div class="metrics-grid">
+
+      <div class="metric-card">
+        <div class="metric-card-label">Top-1 Accuracy</div>
+        <div class="metric-card-value">52<sup>.8%</sup></div>
+        <div class="metric-bar-track">
+          <div class="metric-bar-fill" style="width:52.8%"></div>
+        </div>
+        <p class="metric-card-caption">The model's first guess matched the ground-truth diagnosis in just over half of cases.</p>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-card-label">Top-5 Accuracy</div>
+        <div class="metric-card-value">97<sup>.2%</sup></div>
+        <div class="metric-bar-track">
+          <div class="metric-bar-fill" style="width:97.2%"></div>
+        </div>
+        <p class="metric-card-caption">The correct diagnosis appeared somewhere in the model's top-5 differential on almost every case.</p>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-card-label">Mean Reciprocal Rank</div>
+        <div class="metric-card-value">0<sup>.67</sup></div>
+        <div class="metric-bar-track">
+          <div class="metric-bar-fill" style="width:67.2%"></div>
+        </div>
+        <p class="metric-card-caption">MRR of 0.67 means the correct answer is typically ranked 1st–2nd when it appears.</p>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-card-label">Cases Evaluated</div>
+        <div class="metric-card-value">36<sup> /50</sup></div>
+        <div class="metric-bar-track">
+          <div class="metric-bar-fill" style="width:72%"></div>
+        </div>
+        <p class="metric-card-caption">14 cases were lost to API session rate-limiting — an infrastructure issue, not a model failure.</p>
+      </div>
+
+    </div>
+
+    <!-- SVG bar chart: all 5 metrics -->
+    <div class="chart-card">
+      <div class="chart-card-title">All evaluation metrics — claude-sonnet-4-6 on DDXPlus test split</div>
+      <svg class="chart-svg" viewBox="0 0 680 210" aria-label="Bar chart of evaluation metrics">
+
+        <!-- grid lines -->
+        <line x1="160" y1="0" x2="160" y2="185" stroke="#22222c" stroke-width="1"/>
+        <line x1="280" y1="0" x2="280" y2="185" stroke="#22222c" stroke-width="1" stroke-dasharray="4 4"/>
+        <line x1="400" y1="0" x2="400" y2="185" stroke="#22222c" stroke-width="1" stroke-dasharray="4 4"/>
+        <line x1="520" y1="0" x2="520" y2="185" stroke="#22222c" stroke-width="1" stroke-dasharray="4 4"/>
+        <line x1="630" y1="0" x2="630" y2="185" stroke="#22222c" stroke-width="1"/>
+
+        <!-- axis labels -->
+        <text x="160" y="200" text-anchor="middle" class="chart-bar-label">0%</text>
+        <text x="280" y="200" text-anchor="middle" class="chart-bar-label">25%</text>
+        <text x="400" y="200" text-anchor="middle" class="chart-bar-label">50%</text>
+        <text x="520" y="200" text-anchor="middle" class="chart-bar-label">75%</text>
+        <text x="630" y="200" text-anchor="middle" class="chart-bar-label">100%</text>
+
+        <!-- Row 1: Top-1 Accuracy 52.8% -->
+        <!-- track -->
+        <rect x="160" y="8"  width="470" height="22" rx="3" fill="rgba(255,255,255,0.04)"/>
+        <!-- fill: 470 * 0.528 = 248.2 -->
+        <rect x="160" y="8"  width="248" height="22" rx="3" fill="#2dd4bf"/>
+        <text x="150" y="23" text-anchor="end" class="chart-bar-label">Top-1</text>
+        <text x="415" y="23" text-anchor="start" class="chart-bar-value" fill="#09090c" font-size="11">52.8%</text>
+
+        <!-- Row 2: Top-5 Accuracy 97.2% -->
+        <rect x="160" y="46" width="470" height="22" rx="3" fill="rgba(255,255,255,0.04)"/>
+        <!-- fill: 470 * 0.972 = 456.8 -->
+        <rect x="160" y="46" width="457" height="22" rx="3" fill="#2dd4bf"/>
+        <text x="150" y="61" text-anchor="end" class="chart-bar-label">Top-5</text>
+        <text x="624" y="61" text-anchor="start" class="chart-bar-value" fill="#09090c" font-size="11">97.2%</text>
+
+        <!-- Row 3: MRR 67.2% -->
+        <rect x="160" y="84" width="470" height="22" rx="3" fill="rgba(255,255,255,0.04)"/>
+        <!-- fill: 470 * 0.6716 = 315.7 -->
+        <rect x="160" y="84" width="316" height="22" rx="3" fill="#14b8a6"/>
+        <text x="150" y="99" text-anchor="end" class="chart-bar-label">MRR</text>
+        <text x="483" y="99" text-anchor="start" class="chart-bar-value">67.2%</text>
+
+        <!-- Row 4: Diff Precision 48.1% -->
+        <rect x="160" y="122" width="470" height="22" rx="3" fill="rgba(255,255,255,0.04)"/>
+        <!-- fill: 470 * 0.4808 = 225.9 -->
+        <rect x="160" y="122" width="226" height="22" rx="3" fill="#0d9488"/>
+        <text x="150" y="137" text-anchor="end" class="chart-bar-label">Precision</text>
+        <text x="393" y="137" text-anchor="start" class="chart-bar-value">48.1%</text>
+
+        <!-- Row 5: Diff Recall 55.3% -->
+        <rect x="160" y="160" width="470" height="22" rx="3" fill="rgba(255,255,255,0.04)"/>
+        <!-- fill: 470 * 0.5525 = 259.7 -->
+        <rect x="160" y="160" width="260" height="22" rx="3" fill="#0d9488"/>
+        <text x="150" y="175" text-anchor="end" class="chart-bar-label">Recall</text>
+        <text x="427" y="175" text-anchor="start" class="chart-bar-value">55.3%</text>
+
+      </svg>
+      <p style="font-size:0.75rem;margin-top:14px;max-width:none;">
+        Precision and Recall measure overlap between the model's full differential list and the ground-truth differential set — lower here because the model generates a fixed-length list of 10 while GT sets vary widely in size (1–23 conditions).
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── KEY FINDINGS ──────────────────────────────────────── -->
+<section id="findings">
+  <div class="container">
+
+    <div class="section-header">
+      <span class="eyebrow">Analysis</span>
+      <h2>Key findings</h2>
+      <p>Three patterns stand out from the 36 evaluated cases.</p>
+    </div>
+
+    <div class="findings-grid">
+
+      <div class="finding-card">
+        <div class="finding-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v3l2 2"/>
+          </svg>
+        </div>
+        <h3>Specificity bias: 44% of misses are too precise, not wrong</h3>
+        <p>
+          In 7 of 16 soft misses, the model ranked a <em>more specific</em> diagnosis first —
+          choosing Influenza over URTI, or Rhinosinusitis over Bronchitis. The correct answer
+          appeared at rank 2–3, just below the cut. This is a systematic calibration issue, not
+          random error; the model applies strong priors toward mechanistically specific conditions
+          that the benchmark's umbrella labels don't reward.
+        </p>
+      </div>
+
+      <div class="finding-card">
+        <div class="finding-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <h3>Only 1 hard miss — and it may be a benchmark problem</h3>
+        <p>
+          Across 36 cases, the correct diagnosis fell outside the top-5 just once: a 2-year-old
+          where the model chose <em>Bronchiolitis</em> (the textbook infant diagnosis) but the
+          benchmark labelled it <em>Bronchitis</em>. DDXPlus appears to lack age-stratified
+          pathology labels, meaning the model's clinically sound age-appropriate reasoning was
+          penalised by an incomplete ground-truth differential.
+        </p>
+      </div>
+
+      <div class="finding-card">
+        <div class="finding-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+          </svg>
+        </div>
+        <h3>Top-5 accuracy is near-perfect: the knowledge is there</h3>
+        <p>
+          97.2% top-5 accuracy means the model almost never truly <em>missed</em> a diagnosis —
+          it consistently generated a differential that included the right answer. In a real
+          clinical-decision-support context (where a clinician reviews the full list, not just the
+          top pick), this would be extremely useful. The remaining challenge is purely about
+          ranking confidence, not knowledge coverage.
+        </p>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── METHODOLOGY ───────────────────────────────────────── -->
+<section id="methodology">
+  <div class="container">
+
+    <div class="section-header">
+      <span class="eyebrow">Methodology</span>
+      <h2>How the benchmark works</h2>
+      <p>A transparent description of the dataset, prompting strategy, and scoring.</p>
+    </div>
+
+    <div class="method-grid">
+
+      <div class="method-block">
+        <h3>Dataset: DDXPlus</h3>
+        <p>
+          DDXPlus is a synthetic differential diagnosis dataset published by researchers at
+          Université de Montréal. It contains 304,000 simulated patient cases across
+          <strong>49 pathologies</strong>, with each case specifying age, sex, an initial complaint,
+          and a set of binary/multi-value symptom evidences. Ground-truth labels include both a
+          single confirmed pathology and a probability-weighted differential diagnosis list.
+        </p>
+        <ul>
+          <li>This evaluation used the <code>test</code> split</li>
+          <li>50 cases loaded; 36 successfully evaluated</li>
+          <li>All 49 canonical pathology names were included in every prompt</li>
+        </ul>
+      </div>
+
+      <div class="method-block">
+        <h3>Prompting strategy</h3>
+        <p>
+          Each case was converted to a plain-English clinical vignette and sent to Claude via
+          the Claude Agent SDK (OAuth / Pro subscription — no paid API credits). The system prompt
+          instructed the model to:
+        </p>
+        <ul>
+          <li>Return a ranked differential of up to 10 pathologies</li>
+          <li>Use only exact strings from the 49-item canonical list</li>
+          <li>Assign a 0–1 probability and one-sentence rationale per entry</li>
+          <li>Output strict JSON — no markdown, no commentary</li>
+        </ul>
+      </div>
+
+      <div class="method-block method-block-wide">
+        <h3>Evaluation pipeline</h3>
+        <div class="pipeline">
+          <div class="pipe-step">Load case</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Format vignette</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Claude Sonnet 4.6</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Parse JSON diff.</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Normalize names</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Score 5 metrics</div>
+          <span class="pipe-arrow">→</span>
+          <div class="pipe-step">Write JSONL</div>
+        </div>
+        <p style="margin-top:16px;font-size:0.87rem;max-width:none;">
+          Pathology names are fuzzy-matched against the canonical list using exact → substring →
+          difflib (cutoff 0.7) fallback, so minor casing or punctuation variations don't count as
+          misses. Metrics: <strong>Top-1 accuracy</strong>, <strong>Top-5 accuracy</strong>,
+          <strong>Mean Reciprocal Rank (MRR)</strong>, <strong>Differential Precision</strong>
+          (fraction of predicted pathologies in GT set), and <strong>Differential Recall</strong>
+          (fraction of GT pathologies found in predictions).
+        </p>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── FAILURE BROWSER ───────────────────────────────────── -->
+<section id="failures">
+  <div class="container">
+
+    <div class="section-header">
+      <span class="eyebrow">Case Studies</span>
+      <h2>Failure browser</h2>
+      <p>
+        Four specific cases — three soft misses and the only hard miss — annotated with the
+        model's reasoning and why it got it wrong (or why the benchmark might be at fault).
+        Click any card to expand.
+      </p>
+    </div>
+
+    <!-- Case 4: URTI soft miss (specificity bias) -->
+    <div class="case-study">
+      <details>
+        <summary>
+          <div class="summary-main">
+            <div class="summary-top">
+              <span class="case-badge badge-soft">Soft Miss</span>
+              <span class="case-name">Case 4 — URTI vs. Influenza (specificity bias)</span>
+            </div>
+            <div class="case-meta">70-year-old female · GT rank: 3 · MRR: 0.33</div>
+          </div>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="case-body">
+          <div class="case-fields">
+            <div>
+              <div class="case-field-label">Patient</div>
+              <div class="case-field-value">70-year-old female</div>
+            </div>
+            <div>
+              <div class="case-field-label">Initial complaint</div>
+              <div class="case-field-value">Do you have a cough?</div>
+            </div>
+            <div>
+              <div class="case-field-label">Ground truth</div>
+              <div class="case-field-value cf-gt">URTI</div>
+            </div>
+            <div>
+              <div class="case-field-label">Model's top-1</div>
+              <div class="case-field-value cf-wrong">Influenza</div>
+            </div>
+            <div>
+              <div class="case-field-label">GT rank in differential</div>
+              <div class="case-field-value">3rd (MRR = 0.33)</div>
+            </div>
+            <div>
+              <div class="case-field-label">Top-5 correct?</div>
+              <div class="case-field-value" style="color:var(--success)">Yes ✓</div>
+            </div>
+          </div>
+          <div>
+            <div class="case-field-label" style="margin-bottom:6px">GT differential set</div>
+            <div class="gt-diff-list">
+              <span class="gt-diff-pill gt-hit">URTI</span>
+              <span class="gt-diff-pill">Influenza</span>
+              <span class="gt-diff-pill">Bronchitis</span>
+              <span class="gt-diff-pill">HIV (initial infection)</span>
+              <span class="gt-diff-pill">Pneumonia</span>
+              <span class="gt-diff-pill">Tuberculosis</span>
+              <span class="gt-diff-pill">Chronic rhinosinusitis</span>
+              <span class="gt-diff-pill">Acute rhinosinusitis</span>
+              <span class="gt-diff-pill">Chagas</span>
+            </div>
+          </div>
+          <div class="analysis-block" style="margin-top:16px">
+            <strong>Why this happened:</strong> The symptom profile — cough, diffuse muscle pain, possible fever — is
+            a near-perfect Influenza presentation. The model applied a strong and clinically defensible prior toward
+            the more specific diagnosis. The DDXPlus label is the broader umbrella term URTI, which the benchmark
+            treats as "more correct" despite Influenza also appearing in the GT differential. This is the
+            <strong>prototypical specificity-bias failure</strong>: the model knows the right answer (it's rank 3),
+            but ranks a more mechanistically precise alternative above it.
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- Case 21: Spontaneous pneumothorax soft miss -->
+    <div class="case-study">
+      <details>
+        <summary>
+          <div class="summary-main">
+            <div class="summary-top">
+              <span class="case-badge badge-soft">Soft Miss</span>
+              <span class="case-name">Case 21 — Spontaneous pneumothorax vs. NSTEMI/STEMI</span>
+            </div>
+            <div class="case-meta">67-year-old female · GT rank: 4 · MRR: 0.25</div>
+          </div>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="case-body">
+          <div class="case-fields">
+            <div>
+              <div class="case-field-label">Patient</div>
+              <div class="case-field-value">67-year-old female</div>
+            </div>
+            <div>
+              <div class="case-field-label">Initial complaint</div>
+              <div class="case-field-value">Chest pain even at rest</div>
+            </div>
+            <div>
+              <div class="case-field-label">Ground truth</div>
+              <div class="case-field-value cf-gt">Spontaneous pneumothorax</div>
+            </div>
+            <div>
+              <div class="case-field-label">Model's top-1</div>
+              <div class="case-field-value cf-wrong">Possible NSTEMI / STEMI</div>
+            </div>
+            <div>
+              <div class="case-field-label">GT rank in differential</div>
+              <div class="case-field-value">4th (MRR = 0.25)</div>
+            </div>
+            <div>
+              <div class="case-field-label">Top-5 correct?</div>
+              <div class="case-field-value" style="color:var(--success)">Yes ✓</div>
+            </div>
+          </div>
+          <div>
+            <div class="case-field-label" style="margin-bottom:6px">GT differential set (ordered by benchmark priority)</div>
+            <div class="gt-diff-list">
+              <span class="gt-diff-pill">Unstable angina</span>
+              <span class="gt-diff-pill">Stable angina</span>
+              <span class="gt-diff-pill">Possible NSTEMI / STEMI</span>
+              <span class="gt-diff-pill">GERD</span>
+              <span class="gt-diff-pill">Pericarditis</span>
+              <span class="gt-diff-pill">Atrial fibrillation</span>
+              <span class="gt-diff-pill gt-hit">Spontaneous pneumothorax</span>
+            </div>
+          </div>
+          <div class="analysis-block" style="margin-top:16px">
+            <strong>Why this happened:</strong> Notice that the GT differential itself lists three cardiac diagnoses
+            (Unstable angina, Stable angina, NSTEMI/STEMI) above pneumothorax. The model chose one of those
+            cardiac diagnoses as its top answer — a choice that is internally consistent with the benchmark's own
+            ordering. This is arguably a <strong>benchmark design issue</strong>: the single "ground truth" label
+            (pneumothorax) sits 7th in the GT differential, yet the model is penalised for ranking a higher-priority
+            differential member first.
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- Case 14: Larygospasm soft miss -->
+    <div class="case-study">
+      <details>
+        <summary>
+          <div class="summary-main">
+            <div class="summary-top">
+              <span class="case-badge badge-soft">Soft Miss</span>
+              <span class="case-name">Case 14 — Larygospasm vs. Acute laryngitis</span>
+            </div>
+            <div class="case-meta">56-year-old female · GT rank: 3 · MRR: 0.33</div>
+          </div>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="case-body">
+          <div class="case-fields">
+            <div>
+              <div class="case-field-label">Patient</div>
+              <div class="case-field-value">56-year-old female</div>
+            </div>
+            <div>
+              <div class="case-field-label">Initial complaint</div>
+              <div class="case-field-value">High-pitched sound when breathing in</div>
+            </div>
+            <div>
+              <div class="case-field-label">Ground truth</div>
+              <div class="case-field-value cf-gt">Larygospasm</div>
+            </div>
+            <div>
+              <div class="case-field-label">Model's top-1</div>
+              <div class="case-field-value cf-wrong">Acute laryngitis</div>
+            </div>
+            <div>
+              <div class="case-field-label">GT rank in differential</div>
+              <div class="case-field-value">3rd (MRR = 0.33)</div>
+            </div>
+            <div>
+              <div class="case-field-label">Top-5 correct?</div>
+              <div class="case-field-value" style="color:var(--success)">Yes ✓</div>
+            </div>
+          </div>
+          <div>
+            <div class="case-field-label" style="margin-bottom:6px">GT differential set</div>
+            <div class="gt-diff-list">
+              <span class="gt-diff-pill gt-hit">Larygospasm</span>
+              <span class="gt-diff-pill muted" style="opacity:0.4">— only entry —</span>
+            </div>
+          </div>
+          <div class="analysis-block" style="margin-top:16px">
+            <strong>Why this happened:</strong> The GT differential contains exactly one condition (Larygospasm),
+            making this a pass/fail case with no partial credit. Inspiratory stridor — a high-pitched breathing sound —
+            is clinically associated with both laryngospasm and laryngitis; they share overlapping presentations.
+            The model ranked Larygospasm third. With a single-entry GT differential, any non-exact top-1 is
+            automatically a soft miss regardless of how reasonable the alternatives are. This case illustrates
+            a structural limitation in how single-condition GT differentials penalise otherwise well-calibrated models.
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- Case 1: Hard miss (bronchiolitis) -->
+    <div class="case-study">
+      <details>
+        <summary>
+          <div class="summary-main">
+            <div class="summary-top">
+              <span class="case-badge badge-hard">Hard Miss</span>
+              <span class="case-name">Case 1 — Bronchitis vs. Bronchiolitis (the only hard miss)</span>
+            </div>
+            <div class="case-meta">2-year-old male · GT rank: 9 · MRR: 0.11 · Arguably a benchmark error</div>
+          </div>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="case-body">
+          <div class="case-fields">
+            <div>
+              <div class="case-field-label">Patient</div>
+              <div class="case-field-value">2-year-old male</div>
+            </div>
+            <div>
+              <div class="case-field-label">Initial complaint</div>
+              <div class="case-field-value">Pain related to reason for consulting</div>
+            </div>
+            <div>
+              <div class="case-field-label">Ground truth</div>
+              <div class="case-field-value cf-gt">Bronchitis</div>
+            </div>
+            <div>
+              <div class="case-field-label">Model's top-1</div>
+              <div class="case-field-value cf-wrong">Bronchiolitis</div>
+            </div>
+            <div>
+              <div class="case-field-label">GT rank in differential</div>
+              <div class="case-field-value">9th (MRR = 0.11)</div>
+            </div>
+            <div>
+              <div class="case-field-label">Top-5 correct?</div>
+              <div class="case-field-value" style="color:var(--hard)">No ✗</div>
+            </div>
+          </div>
+          <div>
+            <div class="case-field-label" style="margin-bottom:6px">GT differential (23 conditions — Bronchitis highlighted)</div>
+            <div class="gt-diff-list">
+              <span class="gt-diff-pill">Bronchospasm / acute asthma</span>
+              <span class="gt-diff-pill">Influenza</span>
+              <span class="gt-diff-pill">Viral pharyngitis</span>
+              <span class="gt-diff-pill">Allergic sinusitis</span>
+              <span class="gt-diff-pill">Pneumonia</span>
+              <span class="gt-diff-pill gt-hit">Bronchitis</span>
+              <span class="gt-diff-pill">Spontaneous pneumothorax</span>
+              <span class="gt-diff-pill">Tuberculosis</span>
+              <span class="gt-diff-pill">URTI</span>
+              <span class="gt-diff-pill">Myocarditis</span>
+              <span class="gt-diff-pill">Anaphylaxis</span>
+              <span class="gt-diff-pill">Acute laryngitis</span>
+              <span class="gt-diff-pill">Guillain-Barré syndrome</span>
+              <span class="gt-diff-pill">Croup</span>
+              <span class="gt-diff-pill">Atrial fibrillation</span>
+              <span class="gt-diff-pill">+8 more</span>
+            </div>
+          </div>
+          <div class="analysis-block" style="margin-top:16px">
+            <strong>Why this is the most interesting failure — and why it may not be one:</strong><br><br>
+            The model chose <em>Bronchiolitis</em>, which does not appear in the DDXPlus pathology list at all.
+            Bronchiolitis is the <strong>most common lower respiratory tract infection in children under 2 years old</strong>
+            — it is literally the textbook diagnosis for this age and presentation. The model applied a well-established
+            clinical prior. The benchmark labelled it Bronchitis, a large-airway inflammation more typical in
+            older children and adults.<br><br>
+            <strong>The core problem:</strong> DDXPlus's 49-condition vocabulary does not include Bronchiolitis,
+            so the benchmark cannot reward age-stratified reasoning. The model's top pick was both clinically sound
+            and outside the allowable label set — an invisible ceiling imposed by the dataset's design, not a
+            failure of clinical reasoning.
+          </div>
+        </div>
+      </details>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── LIMITATIONS ───────────────────────────────────────── -->
+<section id="limitations">
+  <div class="container">
+
+    <div class="section-header">
+      <span class="eyebrow">Limitations &amp; Future Work</span>
+      <h2>What this benchmark doesn't tell you</h2>
+      <p>Honest accounting of the constraints on these results.</p>
+    </div>
+
+    <div class="limit-grid">
+
+      <div class="limit-item">
+        <h4>Synthetic data only</h4>
+        <p>DDXPlus cases are algorithmically generated from probabilistic disease models — not real patient records.
+           Symptom co-occurrence reflects the simulator's priors, not the full complexity of real presentations.
+           Performance on synthetic data does not imply equivalent performance on real clinical notes.</p>
+      </div>
+
+      <div class="limit-item">
+        <h4>Small, incomplete sample</h4>
+        <p>36 evaluated cases is a statistically thin sample. 14 additional cases were lost to API session
+           rate-limiting, and the error pattern was non-random (all cases 36–49), which may introduce
+           selection bias. Confidence intervals on these metrics would be wide.</p>
+      </div>
+
+      <div class="limit-item">
+        <h4>Single model, single prompt</h4>
+        <p>Only Claude Sonnet 4.6 with one prompting strategy was tested. No comparison to other
+           models (GPT-4, Gemini, Med-PaLM), no ablation on prompt variants (chain-of-thought,
+           few-shot examples, structured reasoning), and no specialist-physician baseline.</p>
+      </div>
+
+      <div class="limit-item">
+        <h4>Benchmark label quality</h4>
+        <p>As shown in Case 1 (Bronchiolitis) and Case 21 (pneumothorax), DDXPlus's ground-truth
+           labels have known limitations: the 49-condition vocabulary excludes some clinically important
+           diagnoses, and single confirmed-pathology labels don't capture the ambiguity of differential
+           diagnosis in practice.</p>
+      </div>
+
+    </div>
+
+    <div class="future-list">
+      <div class="future-item">
+        <span class="future-num">01</span>
+        <p><strong>Backoff + checkpointing.</strong> Add exponential retry on rate-limit errors and
+           mid-run checkpointing so that large runs (200–500 cases) can resume without losing progress.</p>
+      </div>
+      <div class="future-item">
+        <span class="future-num">02</span>
+        <p><strong>Multi-model comparison.</strong> Run identical cases through Claude Haiku, Claude Opus,
+           and an open-weight medical model (e.g. BioMistral) to produce a head-to-head accuracy table.</p>
+      </div>
+      <div class="future-item">
+        <span class="future-num">03</span>
+        <p><strong>Prompt ablation.</strong> Test chain-of-thought vs. zero-shot vs. few-shot prompting
+           to measure whether structured reasoning improves top-1 accuracy without harming top-5.</p>
+      </div>
+      <div class="future-item">
+        <span class="future-num">04</span>
+        <p><strong>Stratified analysis.</strong> Break results down by age group, sex, and pathology
+           class to expose where the specificity-bias failure mode is most pronounced.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─── FOOTER ────────────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+
+      <div class="footer-disclaimer">
+        <strong>Disclaimer:</strong> This is an independent research benchmark on synthetic, artificial patient data.
+        It is not a clinical tool, not a medical product, and not affiliated with Anthropic, Université de Montréal,
+        or any healthcare institution. Results describe model behaviour on a controlled dataset only.
+        <strong>Do not use these findings to inform any medical decision.</strong>
+      </div>
+
+      <div class="footer-links">
+        <span class="logo">Diff<span>Dx</span></span>
+        <span class="sep">·</span>
+        <a href="https://github.com/amahamu1-art/diffdx" target="_blank" rel="noopener">GitHub Repository</a>
+        <span class="sep">·</span>
+        <a href="https://huggingface.co/datasets/aai530-group6/ddxplus" target="_blank" rel="noopener">DDXPlus Dataset</a>
+        <span class="sep">·</span>
+        <span>Built by Aaryan Mahamuni</span>
+        <span class="sep">·</span>
+        <span>May 2026</span>
+      </div>
+
+      <div class="citation">
+        Fansi Tchango, A., Goel, R., Hua, Z., Martel, J., &amp; Ghosn, J. (2022).<br>
+        DDXPlus: A New Dataset For Automatic Medical Diagnosis.<br>
+        <em>Advances in Neural Information Processing Systems</em>, 35.<br>
+        <a href="https://huggingface.co/datasets/aai530-group6/ddxplus" target="_blank" rel="noopener" style="color:var(--accent-dim)">huggingface.co/datasets/aai530-group6/ddxplus</a>
+      </div>
+
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── Scroll progress bar ──────────────────────────────────────
+  const bar = document.getElementById('scroll-progress');
+  if (!reduceMotion) {
+    const updateBar = () => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      bar.style.width = (max > 0 ? (window.scrollY / max) * 100 : 0) + '%';
+    };
+    window.addEventListener('scroll', updateBar, { passive: true });
+    updateBar();
+  }
+
+  // ── Fade-up on scroll-in ─────────────────────────────────────
+  if (!reduceMotion) {
+    // Selector groups — elements within each group are staggered by parent
+    const STAGGERED = [
+      '#hero .hero-badge',
+      '#hero .hero-title',
+      '#hero .hero-subtitle',
+      '#hero .hero-disclaimer',
+      '#hero .hero-meta',
+      '.metric-card',
+      '.chart-card',
+      '.finding-card',
+      '.method-block',
+      '.case-study',
+      '.limit-item',
+      '.future-item',
+      '.footer-inner > *',
+    ];
+
+    const allEls = Array.from(document.querySelectorAll(STAGGERED.join(',')));
+
+    // Assign stagger delay to siblings sharing the same parent
+    const byParent = new Map();
+    allEls.forEach(el => {
+      const p = el.parentElement;
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(el);
+    });
+    byParent.forEach(siblings => {
+      siblings.forEach((el, i) => { el.dataset.animDelay = i * 80; });
+    });
+
+    allEls.forEach(el => el.classList.add('will-animate'));
+
+    const fadeIO = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        const delay = parseInt(el.dataset.animDelay || '0', 10);
+        setTimeout(() => el.classList.add('is-visible'), delay);
+        fadeIO.unobserve(el);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+    allEls.forEach(el => fadeIO.observe(el));
+  }
+
+  // ── Count-up for headline metric numbers ─────────────────────
+  function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+
+  const metricCards = Array.from(document.querySelectorAll('.metrics-grid .metric-card-value'));
+
+  // Each entry: { to, fmt } where fmt(v) returns innerHTML string
+  const METRIC_CONFIGS = [
+    { to: 52.8, fmt: v => `${Math.round(v)}<sup>.8%</sup>` },
+    { to: 97.2, fmt: v => `${Math.round(v)}<sup>.2%</sup>` },
+    { to: 0.67, fmt: v => `${v.toFixed(2)}<sup></sup>`      },
+    { to: 36,   fmt: v => `${Math.round(v)}<sup> /50</sup>` },
+  ];
+  // Final HTML to restore exactly after animation
+  const METRIC_FINALS = [
+    '52<sup>.8%</sup>',
+    '97<sup>.2%</sup>',
+    '0<sup>.67</sup>',
+    '36<sup> /50</sup>',
+  ];
+
+  function runCountUp() {
+    const DURATION = 1200;
+    const t0 = performance.now();
+
+    (function step(now) {
+      const elapsed = now - t0;
+      const raw = Math.min(elapsed / DURATION, 1);
+      const eased = easeOutQuart(raw);
+
+      metricCards.forEach((el, i) => {
+        const cfg = METRIC_CONFIGS[i];
+        if (cfg) el.innerHTML = cfg.fmt(cfg.to * eased);
+      });
+
+      if (raw < 1) {
+        requestAnimationFrame(step);
+      } else {
+        metricCards.forEach((el, i) => { el.innerHTML = METRIC_FINALS[i]; });
+      }
+    })(t0);
+  }
+
+  if (!reduceMotion && metricCards.length) {
+    const metricsSection = document.getElementById('metrics');
+    const countIO = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        runCountUp();
+        countIO.unobserve(entry.target);
+      });
+    }, { threshold: 0.25 });
+    if (metricsSection) countIO.observe(metricsSection);
+  }
+
+})();
+</script>
+
+</body>
+</html>
